@@ -1,0 +1,30 @@
+# simple_http_proxy.py
+import http.server
+import socketserver
+import urllib.request
+
+PORT = 8888
+
+class Proxy(http.server.SimpleHTTPRequestHandler):
+    def do_GET(self):
+        try:
+            # クライアントからのリクエスト先URLを取得
+            url = self.path
+            if url.startswith("/"):
+                url = "http://" + self.headers['Host'] + url
+
+            print(f"[INFO] Fetching: {url}")
+            with urllib.request.urlopen(url) as response:
+                self.send_response(response.status)
+                for header, value in response.getheaders():
+                    self.send_header(header, value)
+                self.end_headers()
+                self.wfile.write(response.read())
+        except Exception as e:
+            self.send_error(500, str(e))
+
+with socketserver.ThreadingTCPServer(("", PORT), Proxy) as httpd:
+    print(f"Proxy server running on port {PORT}")
+    httpd.serve_forever()
+python3 simple_http_proxy.py
+http://localhost:8888
