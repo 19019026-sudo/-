@@ -1,0 +1,80 @@
+{
+  "name": "simple-http-proxy",
+  "version": "1.0.0",
+  "main": "server.js",
+  "dependencies": {
+    "http-proxy": "^1.18.1",
+    "basic-auth": "^2.0.1",
+    "express": "^4.18.2",
+    "express-rate-limit": "^6.7.0"
+  }
+}
+// server.js
+const express = require('express');
+const httpProxy = require('http-proxy');
+const basicAuth = require('basic-auth');
+const rateLimit = require('express-rate-limit');
+
+const app = express();
+const proxy = httpProxy.createProxyServer({ changeOrigin: true });
+
+// --- 設定 ---
+const PORT = process.env.PORT || 3000;
+const AUTH_USER = process.env.PROXY_USER || 'user';
+const AUTH_PASS = process.env.PROXY_PASS || 'pass';
+
+// 簡易ベーシック認証ミドルウェア
+function auth(req, res, next) {
+  const user = basicAuth(req);
+  if (!user || user.name !== AUTH_USER || user.pass !== AUTH_PASS) {
+    res.set('WWW-Authenticate', 'Basic realm="Proxy"');
+    return res.status(401).send('Authentication required.');
+  }
+  next();
+}
+
+// 簡易レート制限（IP毎）
+const limiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 60 // 1分につき60リクエスト
+});
+
+// エラーハンドリング for proxy
+proxy.on('error', (err, req, res) => {
+  console.error('Proxy error', err);
+  if (!res.headersSent) {
+    res.writeHead(502, { 'Content-Type': 'text/plain' });
+  }
+  res.end('Bad gateway.');
+});
+
+// ルーティング: /proxy?url=TARGET をターゲットに転送
+app.use(limiter);
+app.use(auth);
+
+app.use('/proxy', (req, res) => {
+  const target = req.query.url;
+  if (!target) {
+    return res.status(400).send('Missing url query parameter, e.g. /proxy?url=https://example.com');
+  }
+  // 簡易ログ
+  console.log(`${new Date().toISOString()} - ${req.ip} -> ${target}`);
+
+  // ヘッダ調整や追加があればここで行える
+  req.url = '/'; // proxyモジュールはパスを使う場合があるがここはフルURLへProxy
+  proxy.web(req, res, { target, secure: false, changeOrigin: true });
+});
+
+app.listen(PORT, () => {
+  console.log(`Proxy listening on http://localhost:${PORT}`);
+  console.log('Use: /proxy?url=https://example.com');
+});
+# 1. パッケージインストール
+npm install
+
+# 2. 環境変数で認証情報を変える（任意）
+export PROXY_USER=myuser
+export PROXY_PASS=mypass
+
+# 3. 起動
+node server.js
